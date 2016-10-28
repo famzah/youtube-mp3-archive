@@ -1,0 +1,142 @@
+#!/bin/bash
+set -u
+
+function py_parse_playlist() {
+cat <<EOF
+import json, sys
+obj=json.load(sys.stdin)
+for x in obj["entries"]:
+	print("{} {}".format(x["url"], x["title"].encode('utf-8')))
+EOF
+}
+
+function _cleanup_mp3_files() {
+	rm -f "$mp3file" mp3fname
+}
+
+echo "Start ($0)"
+
+source ~/.aws/mp3-bucket.conf || exit 1
+
+WORKDIR="$(mktemp -d)" || exit 1
+echo "Working directory: $WORKDIR"
+
+cd "$WORKDIR" || exit 1
+
+echo "Downloading 'playlists.conf'..."
+aws s3 cp --only-show-errors s3://$BUCKET_NAME/playlists.conf . || {
+	echo "ERROR: Download of 'playlists.conf' failed" >&2
+	exit 1
+}
+echo "Done"
+
+echo "Listing all mp3 files..."
+S3MP3LIST="$(aws s3 ls --recursive s3://youtube-mp3.famzah/)" || {
+	echo "ERROR: Recursive S3 list of all mp3 files failed: EC=$?" >&2
+	exit 1
+}
+echo "Done: $(echo "$S3MP3LIST"|wc -l) mp3 files listed"
+
+while IFS='' read -r -u"$FD" -d $'\n' plentry; do
+	plurl="${plentry%% *}"
+	pldir="${plentry#* }"
+
+	echo '***'
+	echo "PLAYLIST: $pldir ($plurl)"
+
+	echo "Downloading video list from YouTube..."
+	PLDATA="$(
+		youtube-dl -s --flat-playlist --dump-single-json "$plurl" | \
+			python -c "$(py_parse_playlist)"
+	)" || {
+		echo "ERROR: Unable to download the video list from YouTube" >&2
+		continue
+	}
+	echo "Done"
+
+	while IFS='' read -r -u"$FD2" -d $'\n' videntry; do
+		vidurl="${videntry%% *}"
+		vidtitle="${videntry#* }"
+		mp3file="${vidtitle}-${vidurl}.mp3" # what we foresee as a name; see below
+
+		echo '---' # log separator
+		echo "[vidinfo] $vidtitle ($vidurl)"
+
+		needle="*${vidurl}*"
+		if [[ "$S3MP3LIST" == $needle ]]; then
+			echo "MP3 already exists at S3: skipping"
+			continue
+		fi
+
+		echo "Downloading video from YouTube: $vidurl ..."
+		youtube-dl \
+			--quiet \
+			--no-playlist \
+			--no-overwrites \
+			--no-progress \
+			-f bestaudio \
+			--extract-audio \
+			--audio-format mp3 --audio-quality 0 \
+			--prefer-avconv \
+			--exec 'ln -sf {} mp3fname' \
+			"$vidurl"
+		EC="$?"
+		echo "Done: video download operation"
+
+		if [ "$EC" -ne 0 ]; then
+			echo "ERROR: youtube-dl failed for: $vidurl" >&2
+			_cleanup_mp3_files
+			continue
+		fi
+
+		# refresh the filename; sometimes double quotes are replaced by "youtube-dl", etc.
+		mp3file="$(readlink mp3fname)" || {
+			echo "ERROR: youtube-dl failed to create the symlink" >&2
+			ls -la >&2
+			_cleanup_mp3_files
+			continue
+		}
+
+		if [ ! -e "$mp3file" ]; then
+			echo "ERROR: youtube-dl didn't created the mp3 file: $mp3file" >&2
+			ls -la >&2
+			_cleanup_mp3_files
+			continue
+		fi
+
+		echo "Normalizing MP3 loudness..."
+		mp3gain -r -t -k -p -q "$mp3file"
+		EC="$?"
+		echo "Done: mp3gain"
+
+		if [ "$EC" -ne 0 ]; then
+			echo "ERROR: mp3gain failed for: $mp3file" >&2
+			_cleanup_mp3_files
+			continue
+		fi
+
+		ls -lah "$mp3file"
+
+		s3path="mp3/$pldir/$mp3file"
+		echo "Uploading to 's3://$BUCKET_NAME/$s3path'..."
+		aws s3 cp --only-show-errors "$mp3file" "s3://$BUCKET_NAME/$s3path" || {
+			echo "ERROR: S3 upload failed" >&2
+		}
+		echo "Done: S3 upload operation"
+
+		_cleanup_mp3_files
+
+	done {FD2}<<< "$PLDATA"
+
+done {FD}< <(grep -Pv '^\s*#|^\s*$' playlists.conf)
+
+echo '==='
+
+rm "$WORKDIR/playlists.conf"
+
+rmdir "$WORKDIR" || {
+	echo "ERROR: rmdir($WORKDIR): failed" >&2
+	ls -la "$WORKDIR" >&2
+}
+
+echo "All done."
