@@ -31,7 +31,7 @@ aws s3 cp --only-show-errors s3://$BUCKET_NAME/playlists.conf . || {
 echo "Done"
 
 echo "Listing all mp3 files..."
-S3MP3LIST="$(aws s3 ls --recursive s3://youtube-mp3.famzah/)" || {
+S3MP3LIST="$(aws s3 ls --recursive s3://$BUCKET_NAME/)" || {
 	echo "ERROR: Recursive S3 list of all mp3 files failed: EC=$?" >&2
 	exit 1
 }
