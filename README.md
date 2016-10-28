@@ -44,6 +44,11 @@ wget "https://github.com/famzah/mp3gain-static/raw/master/mp3gain-${ARCH}bit-sta
 tar -xf "mp3gain-${ARCH}bit-static.tar.xz"
 rm "mp3gain-${ARCH}bit-static.tar.xz"
 mv "mp3gain-${ARCH}bit-static" mp3gain
+
+# youtube-mp3-archive
+
+wget 'https://raw.githubusercontent.com/famzah/youtube-mp3-archive/master/youtube-to-s3'
+chmod 755 youtube-to-s3
 ```
 
 # AWS credentials
