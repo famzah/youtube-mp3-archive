@@ -24,14 +24,14 @@ echo "Working directory: $WORKDIR"
 cd "$WORKDIR" || exit 1
 
 echo "Downloading 'playlists.conf'..."
-aws s3 cp --only-show-errors s3://$BUCKET_NAME/playlists.conf . || {
+aws s3 cp --only-show-errors "s3://$BUCKET_NAME/playlists.conf" . || {
 	echo "ERROR: Download of 'playlists.conf' failed" >&2
 	exit 1
 }
 echo "Done"
 
 echo "Listing all mp3 files..."
-S3MP3LIST="$(aws s3 ls --recursive s3://$BUCKET_NAME/)" || {
+S3MP3LIST="$(aws s3 ls --recursive "s3://$BUCKET_NAME/")" || {
 	echo "ERROR: Recursive S3 list of all mp3 files failed: EC=$?" >&2
 	exit 1
 }
@@ -46,7 +46,7 @@ while IFS='' read -r -u"$FD" -d $'\n' plentry; do
 
 	echo "Downloading video list from YouTube..."
 	PLDATA="$(
-		youtube-dl -s --flat-playlist --dump-single-json "$plurl" | \
+		youtube-dl -s --flat-playlist --dump-single-json -- "$plurl" | \
 			python -c "$(py_parse_playlist)"
 	)" || {
 		echo "ERROR: Unable to download the video list from YouTube" >&2
@@ -79,6 +79,7 @@ while IFS='' read -r -u"$FD" -d $'\n' plentry; do
 			--audio-format mp3 --audio-quality 0 \
 			--prefer-avconv \
 			--exec 'ln -sf {} mp3fname' \
+			-- \
 			"$vidurl"
 		EC="$?"
 		echo "Done: video download operation"
@@ -105,6 +106,7 @@ while IFS='' read -r -u"$FD" -d $'\n' plentry; do
 		fi
 
 		echo "Normalizing MP3 loudness..."
+		# can't use "--" because: "I don't recognize option --"
 		mp3gain -r -t -k -p -q "$mp3file"
 		EC="$?"
 		echo "Done: mp3gain"
@@ -119,7 +121,7 @@ while IFS='' read -r -u"$FD" -d $'\n' plentry; do
 
 		s3path="mp3/$pldir/$mp3file"
 		echo "Uploading to 's3://$BUCKET_NAME/$s3path'..."
-		aws s3 cp --only-show-errors "$mp3file" "s3://$BUCKET_NAME/$s3path" || {
+		aws s3 cp --only-show-errors -- "$mp3file" "s3://$BUCKET_NAME/$s3path" || {
 			echo "ERROR: S3 upload failed" >&2
 		}
 		echo "Done: S3 upload operation"
