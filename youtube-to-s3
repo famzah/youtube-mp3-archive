@@ -121,9 +121,11 @@ while IFS='' read -r -u"$FD" -d $'\n' plentry; do
 
 		s3path="mp3/$pldir/$mp3file"
 		echo "Uploading to 's3://$BUCKET_NAME/$s3path'..."
-		aws s3 cp --only-show-errors -- "$mp3file" "s3://$BUCKET_NAME/$s3path" || {
-			echo "ERROR: S3 upload failed" >&2
-		}
+		aws s3 cp \
+			--only-show-errors --storage-class 'STANDARD_IA' -- \
+			"$mp3file" "s3://$BUCKET_NAME/$s3path" || {
+				echo "ERROR: S3 upload failed" >&2
+			}
 		echo "Done: S3 upload operation"
 
 		_cleanup_mp3_files
